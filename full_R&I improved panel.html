@@ -1,0 +1,1679 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy" content="default-src *; connect-src *; style-src 'unsafe-inline'; script-src 'unsafe-inline'; script-src-elem * 'sha256-s43Tw6v+wXmpcpe24aXKAVzMxys/FXUxFCoNqIugH98=';">
+    <title>Interactive P&ID - PNG Frame Animation</title>
+    <script src="https://cdn.jsdelivr.net/npm/@svgdotjs/svg.js@3.2/dist/svg.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/svg-pan-zoom@3.6.1/dist/svg-pan-zoom.min.js"></script>
+    <style>
+        body {
+            margin: 0;
+            font-family: Arial, sans-serif;
+        }
+        
+        /* Top Menu Bar */
+        #top-menu {
+            position: fixed;
+            top: 0;
+            left: 0;
+            background: white;
+            padding: 15px 20px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            z-index: 2000;
+            border-bottom-right-radius: 8px;
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+        
+        .menu-button {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 600;
+            transition: all 0.3s;
+            background: #e0e0e0;
+            color: #333;
+        }
+        
+        .menu-button:hover {
+            background: #d0d0d0;
+            transform: translateY(-2px);
+        }
+        
+        .menu-button.active {
+            background: #4CAF50;
+            color: white;
+        }
+        
+        .menu-button.active:hover {
+            background: #45a049;
+            transform: translateY(-2px);
+        }
+
+        #pid-container {
+            width: 100vw;
+            height: 100vh;
+            background: #f5f5f5;
+        }
+        
+        #pid-container svg {
+            width: 100%;
+            height: 100%;
+        }
+        
+        /* Styles for interactive elements */
+        .clickable {
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        
+        /* RED HOVER EFFECT - Red outline only on children */
+        .clickable:hover {
+            stroke: #ff0000 !important;
+        }
+        
+        /* Apply red outline to ALL child elements */
+        .clickable:hover rect,
+        .clickable:hover path,
+        .clickable:hover circle,
+        .clickable:hover polygon,
+        .clickable:hover polyline,
+        .clickable:hover line,
+        .clickable:hover ellipse {
+            stroke: #ff0000 !important;
+            stroke-width: 2 !important;
+        }
+        
+        /* Keep all elements without fill by default */
+        .clickable:hover rect,
+        .clickable:hover path,
+        .clickable:hover circle,
+        .clickable:hover polygon,
+        .clickable:hover polyline,
+        .clickable:hover line,
+        .clickable:hover ellipse {
+            fill: none !important;
+        }
+        
+        /* EXCEPT elements marked as fill-target - they keep their JavaScript-set fill */
+        .clickable:hover .fill-target {
+            fill: rgba(255, 0, 0, 0.15) !important;
+        }
+        
+        /* Note: Marker arrow for S01 is handled via JavaScript only */
+        
+        #S01:hover #marker2430-7 path {
+            fill: #ff0000 !important;
+            stroke: #ff0000 !important;
+        }
+        
+        /* Info panel */
+        #info-panel {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            width: 600px;
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            display: none;
+            z-index: 1000;
+        }
+        
+        #info-panel.active {
+            display: block;
+        }
+        
+        .close-btn {
+            float: right;
+            cursor: pointer;
+            font-size: 20px;
+        }
+        
+        /* ULTRA SMOOTH Flow animation for pipes (100% stroke-dashoffset= dash-lengh + dash-gap)*/
+        @keyframes flowSmooth {
+            0% {
+                stroke-dashoffset: 0;
+            }
+            100% {
+                stroke-dashoffset: -40;
+            }
+        }
+        
+        @keyframes flowSmoothOffset {
+            0% {
+                stroke-dashoffset: 20;
+            }
+            100% {
+                stroke-dashoffset: -20;
+            }
+        }
+     
+        /* Apply flowing animation to standard blue pipes */
+        .pipe.flowing path {
+            stroke-dasharray: 10 10 !important;
+            animation: flowSmoothOffset 1s linear infinite !important;
+            stroke: #0066ff !important;
+            stroke-width: 2 !important;
+        }
+        
+        /* Apply flowing animation to red pipes */
+        .pipe-red.flowing path {
+            stroke-dasharray: 10 10 !important;
+            animation: flowSmooth 1s linear infinite !important;
+            stroke: #ff0000 !important;
+            stroke-width: 2 !important;
+        }
+
+        .pipe-blue-red.flowing path.red-layer {
+            fill: none;
+            stroke: #ff0000 !important;
+            stroke-width: 2 !important;
+            stroke-dasharray: 10 30 !important; /* dash 10, then skip 30 */
+            animation: flowRed 1s linear infinite !important;
+        }
+
+        .pipe-blue-red.flowing path.blue-layer {
+            fill: none;
+            stroke: #0066ff !important;
+            stroke-width: 2 !important;
+            stroke-dasharray: 10 30 !important; /* same pattern… */
+            animation: flowBlue 1s linear infinite !important;
+        }
+
+        /* Both travel exactly -40 (one full 40-unit cycle) → no jerk */
+        @keyframes flowRed  { from { stroke-dashoffset:  0;  } to { stroke-dashoffset: -40; } }
+        @keyframes flowBlue { from { stroke-dashoffset: 20;  } to { stroke-dashoffset: -20; } }
+        /*                                              ↑ shifts blue into the 20–30 window   */
+
+        
+        .pipe-blue-blue-red.flowing path.blue-layer {
+            fill: none;
+            stroke: #0066ff !important;
+            stroke-width: 2 !important;
+            stroke-dasharray: 10 10 10 10 10 10 10 30 !important; /* total = 60 */
+            animation: flowBlue2 2s linear infinite !important;
+        }
+
+        /* Red layer: single dash offset to the 3rd slot (40–50) */
+        .pipe-blue-blue-red.flowing path.red-layer{
+            fill: none;
+            stroke: #ff2200 !important;
+            stroke-width: 2 !important;
+            stroke-dasharray: 10 90 !important;       /* total = 60 */
+            animation: flowRed2 2s linear infinite !important;
+        }
+
+        /* Both travel exactly -60 (one full cycle) → no jerk on loop */
+        @keyframes flowBlue2 {
+            from { stroke-dashoffset:   0; } to   { stroke-dashoffset: -100; }
+        }
+
+        @keyframes flowRed2 {
+            from { stroke-dashoffset:  -80; } to   { stroke-dashoffset: -180; }
+        }
+        
+        /* ============================================ */
+        /* CYCLONE PNG FRAME ANIMATION CONTAINER       */
+        /* ============================================ */
+        
+        /* EASY CUSTOMIZATION VARIABLES */
+        :root {
+            --cyclone-anim-width: 15px;      /* Change width here */
+            --cyclone-anim-height: 20px;     /* Change height here */
+            --cyclone-anim-border: 1px;       /* Border thickness */
+            --cyclone-anim-border-color: #4CAF50;  /* Border color */
+            --cyclone-anim-shadow: 0 4px 12px rgba(0,0,0,0.2);  /* Shadow */
+        }
+        
+        #cyclone-animation-container {
+            position: absolute;
+            display: none;  /* Hidden by default */
+            width: var(--cyclone-anim-width);
+            height: var(--cyclone-anim-height);
+            top: var(--cyclone-anim-top);
+            left: var(--cyclone-anim-left);
+            z-index: 100;
+            overflow: visible;
+            background: rgba(224, 224, 224, 0);
+            transform: translate(-50%, -50%);  /* Center on position */
+        }
+        
+        #cyclone-animation-container.active {
+            display: block;
+        }
+        
+        #cyclone-frame {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;  /* or 'cover' to fill completely */
+            image-rendering: -webkit-optimize-contrast;  /* Crisp rendering */
+            image-rendering: crisp-edges;
+        }
+        
+        /* Hide S01 arrow and path during simulation */
+        body.simulation-active #S01 path[id="path15306"] {
+            display: none !important;
+        }
+        
+        body.simulation-active #marker2430-7 {
+            display: none !important;
+        }
+        
+        /* ============================================ */
+        /* PAN-ZOOM BUTTON CUSTOMIZATION               */
+        /* ============================================ */
+        
+        /* Position: Bottom Right */
+        .svg-pan-zoom-control {
+            position: absolute !important;
+            top: auto !important;
+            bottom: 20px !important;
+            right: 20px !important;
+            display: flex !important;
+            flex-direction: column !important;
+            gap: 8px !important;
+        }
+        
+        /* Button Size and Style */
+        .svg-pan-zoom-control svg {
+            width: 45px !important;
+            height: 45px !important;
+            background: white !important;
+            border-radius: 8px !important;
+            border: 2px solid #e0e0e0 !important;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.15) !important;
+            cursor: pointer !important;
+            transition: all 0.3s ease !important;
+            padding: 10px !important;
+        }
+        
+        /* Icon Color */
+        .svg-pan-zoom-control svg path {
+            fill: #333333 !important;
+        }
+        
+        /* Hover Effect */
+        .svg-pan-zoom-control svg:hover {
+            background: #4CAF50 !important;
+            border-color: #4CAF50 !important;
+            transform: translateY(-2px) !important;
+            box-shadow: 0 4px 12px rgba(76, 175, 80, 0.3) !important;
+        }
+        
+        .svg-pan-zoom-control svg:hover path {
+            fill: white !important;
+        }
+    </style>
+</head>
+<body>
+   <!-- Top Menu Bar -->
+    <div id="top-menu">
+        <button class="menu-button" id="simulation-toggle" onclick="toggleSimulation()">
+            Start Simulation
+        </button>
+    </div>
+
+    <div id="pid-container">
+        
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!-- SVG here -->
+
+<svg
+   version="1.1"
+   id="svg1"
+   width="1015"
+   height="693"
+   viewBox="0 0 1015 693"
+   sodipodi:docname="RuI-Full-Labor.svg"
+   inkscape:version="1.4.3 (0d15f75, 2025-12-25)"
+   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+   xmlns:xlink="http://www.w3.org/1999/xlink"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg">
+  <defs
+     id="defs1">
+    <rect
+       x="266.036"
+       y="97.982007"
+       width="85.51157"
+       height="76.604115"
+       id="rect81" />
+    <rect
+       x="148.54014"
+       y="161.24216"
+       width="26.243842"
+       height="15.536354"
+       id="rect5" />
+    <inkscape:path-effect
+       effect="powerstroke"
+       message=""
+       id="path-effect22"
+       is_visible="true"
+       lpeversion="1.3"
+       scale_width="1"
+       interpolator_type="CentripetalCatmullRom"
+       interpolator_beta="0.75"
+       start_linecap_type="round"
+       end_linecap_type="round"
+       offset_points="4.1046878,1.7683838"
+       linejoin_type="spiro"
+       miter_limit="4"
+       not_jump="true"
+       sort_points="true" />
+    <inkscape:path-effect
+       effect="simplify"
+       id="path-effect21"
+       is_visible="true"
+       lpeversion="1.3"
+       threshold="0.012"
+       steps="1"
+       smooth_angles="0"
+       helper_size="0"
+       simplify_individual_paths="false"
+       simplify_just_coalesce="false"
+       step="1" />
+    <inkscape:path-effect
+       effect="powerstroke"
+       message=""
+       id="path-effect20"
+       is_visible="true"
+       lpeversion="1.3"
+       scale_width="1"
+       interpolator_type="CentripetalCatmullRom"
+       interpolator_beta="0.75"
+       start_linecap_type="round"
+       end_linecap_type="round"
+       offset_points="4.4406225,0.39365762"
+       linejoin_type="spiro"
+       miter_limit="4"
+       not_jump="true"
+       sort_points="true" />
+    <inkscape:path-effect
+       effect="simplify"
+       id="path-effect19"
+       is_visible="true"
+       lpeversion="1.3"
+       threshold="0.012"
+       steps="1"
+       smooth_angles="0"
+       helper_size="0"
+       simplify_individual_paths="false"
+       simplify_just_coalesce="false"
+       step="1" />
+    <inkscape:path-effect
+       effect="powerstroke"
+       message=""
+       id="path-effect18"
+       is_visible="true"
+       lpeversion="1.3"
+       scale_width="1"
+       interpolator_type="CentripetalCatmullRom"
+       interpolator_beta="0.75"
+       start_linecap_type="round"
+       end_linecap_type="round"
+       offset_points="128.97468,0.32599771"
+       linejoin_type="spiro"
+       miter_limit="4"
+       not_jump="true"
+       sort_points="true" />
+    <inkscape:path-effect
+       effect="simplify"
+       id="path-effect17"
+       is_visible="true"
+       lpeversion="1.3"
+       threshold="0.012"
+       steps="1"
+       smooth_angles="0"
+       helper_size="0"
+       simplify_individual_paths="false"
+       simplify_just_coalesce="false"
+       step="1" />
+    <marker
+       markerWidth="9.4488211"
+       markerHeight="4.7226381"
+       refX="4.7244105"
+       refY="2.3613191"
+       orient="auto"
+       id="marker2430-7">
+      <path
+         style="opacity:1;fill:#000000;fill-opacity:1;stroke:#000000;stroke-width:0;stroke-linecap:round;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:none;stroke-dashoffset:6.51969;stroke-opacity:1;paint-order:normal"
+         d="m 1.8897638e-6,2.4201488e-6 c 0,0 0,4.7226330798512 0,4.7226330798512 L 9.4488208,2.3613379 Z"
+         id="path2428-3" />
+    </marker>
+  </defs>
+  <sodipodi:namedview
+     id="namedview1"
+     pagecolor="#ffffff"
+     bordercolor="#000000"
+     borderopacity="0.25"
+     inkscape:showpageshadow="2"
+     inkscape:pageopacity="0.0"
+     inkscape:pagecheckerboard="0"
+     inkscape:deskcolor="#d1d1d1"
+     inkscape:zoom="1.1907555"
+     inkscape:cx="314.50621"
+     inkscape:cy="280.49419"
+     inkscape:window-width="1718"
+     inkscape:window-height="1360"
+     inkscape:window-x="2793"
+     inkscape:window-y="248"
+     inkscape:window-maximized="0"
+     inkscape:current-layer="layer3" />
+  <g
+     inkscape:groupmode="layer"
+     id="layer3"
+     inkscape:label="Layer 1">
+    <g
+       id="g49"
+       inkscape:label="random"
+       transform="translate(-82.300689,5.0388177)">
+      <text
+         xml:space="preserve"
+         style="font-size:16px;writing-mode:lr-tb;direction:ltr;fill:#000000;fill-opacity:1;stroke:none;stroke-width:1;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1"
+         x="626.49097"
+         y="551.96533"
+         id="text84"><tspan
+           sodipodi:role="line"
+           id="tspan84"
+           x="626.49097"
+           y="551.96533">VP01/F01</tspan></text>
+      <text
+         xml:space="preserve"
+         style="font-size:16px;writing-mode:lr-tb;direction:ltr;fill:#000000;fill-opacity:1;stroke:none;stroke-width:1;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1"
+         x="962.599"
+         y="672.21594"
+         id="text85"><tspan
+           sodipodi:role="line"
+           id="tspan85"
+           x="962.599"
+           y="672.21594">B03</tspan></text>
+      <text
+         xml:space="preserve"
+         style="font-size:16px;writing-mode:lr-tb;direction:ltr;fill:#000000;fill-opacity:1;stroke:none;stroke-width:1;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1"
+         x="963.19281"
+         y="517.82007"
+         id="text86"><tspan
+           sodipodi:role="line"
+           id="tspan86"
+           x="963.19281"
+           y="517.82007">S01</tspan></text>
+      <text
+         xml:space="preserve"
+         style="font-size:16px;writing-mode:lr-tb;direction:ltr;fill:#000000;fill-opacity:1;stroke:none;stroke-width:1;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1"
+         x="731.59894"
+         y="203.68381"
+         id="text87"><tspan
+           sodipodi:role="line"
+           id="tspan87"
+           x="731.59894"
+           y="203.68381">H01</tspan></text>
+      <text
+         xml:space="preserve"
+         style="font-size:16px;writing-mode:lr-tb;direction:ltr;fill:#000000;fill-opacity:1;stroke:none;stroke-width:1;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1"
+         x="651.43188"
+         y="160.33418"
+         id="text88"><tspan
+           sodipodi:role="line"
+           id="tspan88"
+           x="651.43188"
+           y="160.33418">B01</tspan></text>
+      <text
+         xml:space="preserve"
+         style="font-size:16px;writing-mode:lr-tb;direction:ltr;fill:#000000;fill-opacity:1;stroke:none;stroke-width:1;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1"
+         x="119.65681"
+         y="337.29562"
+         id="text89"><tspan
+           sodipodi:role="line"
+           id="tspan89"
+           x="119.65681"
+           y="337.29562">Luft</tspan><tspan
+           sodipodi:role="line"
+           x="119.65681"
+           y="357.29562"
+           id="tspan90">Atm., 20°C</tspan></text>
+      <text
+         xml:space="preserve"
+         style="font-size:16px;writing-mode:lr-tb;direction:ltr;fill:#000000;fill-opacity:1;stroke:none;stroke-width:1;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1"
+         x="120.84447"
+         y="47.209511"
+         id="text91"><tspan
+           sodipodi:role="line"
+           id="tspan91"
+           x="120.84447"
+           y="47.209511">Korkmehl</tspan><tspan
+           sodipodi:role="line"
+           x="120.84447"
+           y="67.209511"
+           id="tspan92">1-2 mm</tspan></text>
+      <ellipse
+         style="fill:none;stroke:#000000;stroke-width:1.03134;stroke-opacity:1"
+         id="path2-89"
+         cx="416.45587"
+         cy="306.10779"
+         rx="22.039705"
+         ry="22.23074" />
+      <ellipse
+         style="fill:none;stroke:#000000;stroke-width:1.03134;stroke-opacity:1"
+         id="path2-3"
+         cx="512.11853"
+         cy="198.78523"
+         rx="22.039705"
+         ry="22.23074" />
+      <ellipse
+         style="fill:none;stroke:#000000;stroke-width:1.03134;stroke-opacity:1"
+         id="path2-87"
+         cx="555.78827"
+         cy="198.86287"
+         rx="22.039705"
+         ry="22.23074" />
+      <ellipse
+         style="fill:none;stroke:#000000;stroke-width:1.03134;stroke-opacity:1"
+         id="path2-9"
+         cx="515.61603"
+         cy="251.48671"
+         rx="22.039705"
+         ry="22.23074" />
+      <ellipse
+         style="fill:none;stroke:#000000;stroke-width:1.03134;stroke-opacity:1"
+         id="path2-6"
+         cx="559.99219"
+         cy="250.88474"
+         rx="22.039705"
+         ry="22.23074" />
+      <ellipse
+         style="fill:none;stroke:#000000;stroke-width:1.03134;stroke-opacity:1"
+         id="path2-1"
+         cx="618.82312"
+         cy="431.07672"
+         rx="22.039705"
+         ry="22.23074" />
+      <ellipse
+         style="fill:none;stroke:#000000;stroke-width:1.03134;stroke-opacity:1"
+         id="path2-13"
+         cx="663.315"
+         cy="431.43506"
+         rx="22.039705"
+         ry="22.23074" />
+      <ellipse
+         style="fill:none;stroke:#000000;stroke-width:1.03134;stroke-opacity:1"
+         id="path2-0"
+         cx="951.47772"
+         cy="286.82895"
+         rx="22.039705"
+         ry="22.23074" />
+      <text
+         xml:space="preserve"
+         style="writing-mode:lr-tb;direction:ltr;fill:#000000;fill-opacity:1;stroke:none;stroke-opacity:1"
+         x="432.70847"
+         y="331.9321"
+         id="text49"><tspan
+           sodipodi:role="line"
+           id="tspan49"
+           x="432.70847"
+           y="331.9321">H</tspan></text>
+      <text
+         xml:space="preserve"
+         style="writing-mode:lr-tb;direction:ltr;fill:#000000;fill-opacity:1;stroke:none;stroke-opacity:1"
+         x="504.09171"
+         y="194.20444"
+         id="text10"><tspan
+           sodipodi:role="line"
+           id="tspan10"
+           x="504.09171"
+           y="194.20444">HS</tspan></text>
+      <text
+         xml:space="preserve"
+         style="writing-mode:lr-tb;direction:ltr;fill:#000000;fill-opacity:1;stroke:none;stroke-opacity:1"
+         x="503.88177"
+         y="211.21043"
+         id="text11"><tspan
+           sodipodi:role="line"
+           id="tspan11"
+           x="503.88177"
+           y="211.21043">03</tspan></text>
+      <text
+         xml:space="preserve"
+         style="writing-mode:lr-tb;direction:ltr;fill:#000000;fill-opacity:1;stroke:none;stroke-opacity:1"
+         x="509.76038"
+         y="246.69212"
+         id="text12"><tspan
+           sodipodi:role="line"
+           id="tspan12"
+           x="509.76038"
+           y="246.69212">FI</tspan></text>
+      <text
+         xml:space="preserve"
+         style="writing-mode:lr-tb;direction:ltr;fill:#000000;fill-opacity:1;stroke:none;stroke-opacity:1"
+         x="508.29074"
+         y="264.11801"
+         id="text13"><tspan
+           sodipodi:role="line"
+           id="tspan13"
+           x="508.29074"
+           y="264.11801">02</tspan></text>
+      <text
+         xml:space="preserve"
+         style="font-size:19.808px;writing-mode:lr-tb;direction:ltr;fill:#000000;fill-opacity:1;stroke:none;stroke-width:1.65067;stroke-opacity:1"
+         x="523.46918"
+         y="215.03992"
+         id="text14"
+         transform="scale(1.045692,0.95630453)"><tspan
+           sodipodi:role="line"
+           id="tspan14"
+           x="523.46918"
+           y="215.03992"
+           style="stroke-width:1.65067">M</tspan></text>
+      <text
+         xml:space="preserve"
+         style="writing-mode:lr-tb;direction:ltr;fill:#000000;fill-opacity:1;stroke:none;stroke-opacity:1"
+         x="551.75055"
+         y="246.90205"
+         id="text15"><tspan
+           sodipodi:role="line"
+           id="tspan15"
+           x="551.75055"
+           y="246.90205">WI</tspan></text>
+      <text
+         xml:space="preserve"
+         style="writing-mode:lr-tb;direction:ltr;fill:#000000;fill-opacity:1;stroke:none;stroke-opacity:1"
+         x="552.59033"
+         y="264.53793"
+         id="text16"><tspan
+           sodipodi:role="line"
+           id="tspan16"
+           x="552.59033"
+           y="264.53793">02</tspan></text>
+      <text
+         xml:space="preserve"
+         style="writing-mode:lr-tb;direction:ltr;fill:#000000;fill-opacity:1;stroke:none;stroke-opacity:1"
+         x="410.45367"
+         y="303.37881"
+         id="text17"><tspan
+           sodipodi:role="line"
+           id="tspan17"
+           x="410.45367"
+           y="303.37881">FI</tspan></text>
+      <text
+         xml:space="preserve"
+         style="writing-mode:lr-tb;direction:ltr;fill:#000000;fill-opacity:1;stroke:none;stroke-opacity:1"
+         x="409.61386"
+         y="319.12512"
+         id="text18"><tspan
+           sodipodi:role="line"
+           id="tspan18"
+           x="409.61386"
+           y="319.12512">01</tspan></text>
+      <text
+         xml:space="preserve"
+         style="writing-mode:lr-tb;direction:ltr;fill:#000000;fill-opacity:1;stroke:none;stroke-opacity:1"
+         x="610.39435"
+         y="426.61728"
+         id="text30"><tspan
+           sodipodi:role="line"
+           id="tspan30"
+           x="610.39435"
+           y="426.61728">HS</tspan></text>
+      <text
+         xml:space="preserve"
+         style="writing-mode:lr-tb;direction:ltr;fill:#000000;fill-opacity:1;stroke:none;stroke-opacity:1"
+         x="612.37085"
+         y="443.95624"
+         id="text31"><tspan
+           sodipodi:role="line"
+           id="tspan31"
+           x="612.37085"
+           y="443.95624">01</tspan></text>
+      <text
+         xml:space="preserve"
+         style="font-size:20.2418px;writing-mode:lr-tb;direction:ltr;fill:#000000;fill-opacity:1;stroke:none;stroke-width:1.68682;stroke-dasharray:none;stroke-opacity:1"
+         x="612.21399"
+         y="469.39194"
+         id="text36"
+         transform="scale(1.0685925,0.93581043)"><tspan
+           sodipodi:role="line"
+           id="tspan36"
+           x="612.21399"
+           y="469.39194"
+           style="stroke-width:1.68682">M</tspan></text>
+      <text
+         xml:space="preserve"
+         style="writing-mode:lr-tb;direction:ltr;fill:#000000;fill-opacity:1;stroke:none;stroke-opacity:1"
+         x="941.20911"
+         y="283.22354"
+         id="text40"><tspan
+           sodipodi:role="line"
+           id="tspan40"
+           x="941.20911"
+           y="283.22354">PDI</tspan></text>
+      <text
+         xml:space="preserve"
+         style="writing-mode:lr-tb;direction:ltr;fill:#000000;fill-opacity:1;stroke:none;stroke-opacity:1"
+         x="944.56836"
+         y="301.06937"
+         id="text41"><tspan
+           sodipodi:role="line"
+           id="tspan41"
+           x="944.56836"
+           y="301.06937">01</tspan></text>
+      <text
+         xml:space="preserve"
+         style="writing-mode:lr-tb;direction:ltr;fill:#000000;fill-opacity:1;stroke:none;stroke-opacity:1"
+         x="966.82312"
+         y="268.31705"
+         id="text42"><tspan
+           sodipodi:role="line"
+           id="tspan42"
+           x="966.82312"
+           y="268.31705">H</tspan></text>
+      <text
+         xml:space="preserve"
+         style="writing-mode:lr-tb;direction:ltr;fill:#000000;fill-opacity:1;stroke:none;stroke-opacity:1"
+         x="967.24298"
+         y="316.60568"
+         id="text43"><tspan
+           sodipodi:role="line"
+           id="tspan43"
+           x="967.24298"
+           y="316.60568">L</tspan></text>
+      <text
+         xml:space="preserve"
+         style="writing-mode:lr-tb;direction:ltr;fill:#000000;fill-opacity:1;stroke:none;stroke-opacity:1"
+         x="576.1048"
+         y="281.12402"
+         id="text46"
+         inkscape:label="text46"><tspan
+           sodipodi:role="line"
+           id="tspan46"
+           x="576.1048"
+           y="281.12402">L</tspan></text>
+      <text
+         xml:space="preserve"
+         style="writing-mode:lr-tb;direction:ltr;fill:#000000;fill-opacity:1;stroke:none;stroke-opacity:1"
+         x="575.26495"
+         y="232.20552"
+         id="text47"><tspan
+           sodipodi:role="line"
+           id="tspan47"
+           x="575.26495"
+           y="232.20552">H</tspan></text>
+      <ellipse
+         style="fill:none;stroke:#000000;stroke-width:1.03134;stroke-opacity:1"
+         id="path2"
+         cx="157.90842"
+         cy="176.56639"
+         rx="22.039705"
+         ry="22.23074" />
+      <path
+         style="fill:none;stroke:#000000;stroke-opacity:1"
+         d="m 135.73315,176.46359 h 43.98468"
+         id="path4" />
+      <text
+         xml:space="preserve"
+         id="text5"
+         style="writing-mode:lr-tb;direction:ltr;white-space:pre;shape-inside:url(#rect5);display:inline;fill:#000000;fill-opacity:1;stroke:none;stroke-opacity:1"
+         transform="translate(0.83980293,0.10497537)"><tspan
+           x="148.54102"
+           y="172.19015"
+           id="tspan2">HS
+</tspan></text>
+      <text
+         xml:space="preserve"
+         style="writing-mode:lr-tb;direction:ltr;fill:#000000;fill-opacity:1;stroke:none;stroke-opacity:1"
+         x="150.21976"
+         y="189.58551"
+         id="text6"><tspan
+           sodipodi:role="line"
+           id="tspan6"
+           x="150.21976"
+           y="189.58551">04</tspan><tspan
+           sodipodi:role="line"
+           x="150.21976"
+           y="204.58551"
+           id="tspan7" /></text>
+      <path
+         style="fill:none;fill-opacity:1;stroke:#000000;stroke-opacity:1"
+         d="M 577.79693,198.48779 H 718.83164"
+         id="path49" />
+      <path
+         style="fill:none;fill-opacity:1;stroke:#000000;stroke-opacity:1"
+         d="M 533.70502,198.33934 H 476.69731"
+         id="path51" />
+      <path
+         style="fill:none;fill-opacity:1;stroke:#000000;stroke-opacity:1"
+         d="M 478.77572,251.19024 H 599.91711"
+         id="path52" />
+      <path
+         style="fill:none;fill-opacity:1;stroke:#000000;stroke-dasharray:8, 3;stroke-dashoffset:0;stroke-opacity:1"
+         d="m 476.54885,198.19088 h -17.07262 v 52.70244 h 19.29949"
+         id="path55" />
+      <path
+         style="fill:none;fill-opacity:1;stroke:#000000;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1"
+         d="m 394.44307,305.95934 h 44.24036"
+         id="path57" />
+      <path
+         style="fill:none;fill-opacity:1;stroke:#000000;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1"
+         d="M 640.92414,430.93932 H 596.83448"
+         id="path72" />
+      <path
+         style="fill:none;fill-opacity:1;stroke:#000000;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1"
+         d="m 663.08365,453.75465 v 16.16621"
+         id="path75" />
+      <path
+         id="path78"
+         style="fill:none;fill-opacity:1;stroke:#000000;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1"
+         d="m 979.27583,376.55976 3.26735,4.50083 m -5.09183,-3.16021 3.34609,4.51394 m -1.37727,-2.40349 -48.91852,32.75231"
+         sodipodi:nodetypes="cccccc" />
+      <path
+         style="fill:none;fill-opacity:1;stroke:#000000;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1"
+         d="m 980.155,388.93373 c 0.9487,1.34217 1.47063,2.08689 3.04428,4.30399"
+         id="path79"
+         sodipodi:nodetypes="cc" />
+      <path
+         style="fill:none;fill-opacity:1;stroke:#000000;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1"
+         d="m 977.98831,390.45166 3.04428,4.30399"
+         id="path79-0" />
+      <path
+         id="path81"
+         style="fill:none;fill-opacity:1;stroke:#000000;stroke-width:1;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1"
+         d="m 903.10308,419.90147 v -43.24986 m 0.20994,-11.44231 0.10498,-78.4166 h 85.44995 v 99.3067 l -49.54837,33.80207" />
+      <ellipse
+         style="fill:none;stroke:#000000;stroke-width:1.03134;stroke-opacity:1"
+         id="path2-8"
+         cx="157.60405"
+         cy="237.71962"
+         rx="22.039705"
+         ry="22.23074" />
+      <path
+         style="fill:none;stroke:#000000;stroke-opacity:1"
+         d="m 135.62817,237.97916 h 43.87971"
+         id="path5" />
+      <text
+         xml:space="preserve"
+         style="writing-mode:lr-tb;direction:ltr;fill:#000000;fill-opacity:1;stroke:none;stroke-opacity:1"
+         x="149.05142"
+         y="234.11761"
+         id="text8"><tspan
+           sodipodi:role="line"
+           id="tspan8"
+           x="149.05142"
+           y="234.11761">HS</tspan></text>
+      <text
+         xml:space="preserve"
+         style="writing-mode:lr-tb;direction:ltr;fill:#000000;fill-opacity:1;stroke:none;stroke-opacity:1"
+         x="150.536"
+         y="250.59641"
+         id="text9"><tspan
+           sodipodi:role="line"
+           id="tspan9"
+           x="150.536"
+           y="250.59641">04</tspan></text>
+      <path
+         style="fill:none;fill-opacity:1;fill-rule:nonzero;stroke:#000000;stroke-width:1;stroke-dasharray:none;stroke-opacity:1"
+         d="m 256.13989,19.735368 c 7.1158,7.060834 12.76048,13.631295 21.41497,21.205024 L 255.92994,61.515563 V 52.067781 H 223.59753 V 30.442856 h 32.12246 z"
+         id="path24"
+         inkscape:label="arrow-01"
+         sodipodi:nodetypes="cccccccc" />
+      <path
+         style="fill:none;fill-opacity:1;fill-rule:nonzero;stroke:#000000;stroke-width:1;stroke-dasharray:none;stroke-opacity:1"
+         d="m 255.97951,318.67081 c 7.1158,7.06084 12.76048,13.6313 21.41497,21.20503 l -21.62492,20.57517 v -9.44779 H 223.43715 V 329.3783 h 32.12246 z"
+         id="path24-2"
+         inkscape:label="arrow-02"
+         sodipodi:nodetypes="cccccccc" />
+      <path
+         style="fill:none;fill-opacity:1;fill-rule:nonzero;stroke:#000000;stroke-width:1;stroke-dasharray:none;stroke-opacity:1"
+         d="m 247.89687,478.83553 c -7.1158,7.06084 -12.76048,13.6313 -21.41497,21.20503 l 21.62492,20.57517 v -9.44779 h 32.33241 v -21.62492 h -32.12246 z"
+         id="path24-2-2"
+         inkscape:label="arrow-02"
+         sodipodi:nodetypes="cccccccc" />
+      <text
+         xml:space="preserve"
+         style="font-size:16px;writing-mode:lr-tb;direction:ltr;fill:#000000;fill-opacity:1;stroke:none;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1"
+         x="172.15959"
+         y="505.5614"
+         id="text21"><tspan
+           sodipodi:role="line"
+           id="tspan21"
+           x="172.15959"
+           y="505.5614">Luft</tspan></text>
+      <path
+         style="fill:none;fill-opacity:1;stroke:#000000;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1"
+         d="M 416.43729,328.25798 V 340.5401"
+         id="path21" />
+    </g>
+    <g
+       id="g2"
+       inkscape:label="squares"
+       transform="translate(-82.300689,5.0388177)">
+      <path
+         style="fill:none;stroke:#000000;stroke-opacity:1"
+         d="m 727.47929,257.60955 21.7299,21.7299 -21.15254,21.15254 -21.57243,-21.57244 z"
+         id="path1"
+         inkscape:label="square-02" />
+      <path
+         style="fill:none;stroke:#000000;stroke-opacity:1"
+         d="m 644.08232,318.82181 21.7299,21.7299 -21.15254,21.15254 -21.57243,-21.57244 z"
+         id="path1-8"
+         inkscape:label="square-01" />
+      <path
+         style="fill:none;stroke:#000000;stroke-opacity:1"
+         d="m 875.49561,398.48009 21.7299,21.7299 -21.15254,21.15254 -21.57243,-21.57244 z"
+         id="path1-1"
+         inkscape:label="square-03" />
+      <path
+         style="fill:none;stroke:#000000;stroke-opacity:1"
+         d="m 875.10906,349.6868 21.7299,21.7299 -21.15254,21.15254 -21.57243,-21.57244 z"
+         id="path1-2"
+         inkscape:label="square-04" />
+      <path
+         style="fill:none;stroke:#000000;stroke-opacity:1"
+         d="m 930.15071,534.20846 21.7299,21.7299 -21.15254,21.15254 -21.57243,-21.57244 z"
+         id="path1-23"
+         inkscape:label="square-02" />
+      <text
+         xml:space="preserve"
+         style="writing-mode:lr-tb;direction:ltr;fill:#000000;fill-opacity:1;stroke:none;stroke-opacity:1"
+         x="867.93634"
+         y="424.94028"
+         id="text38"
+         inkscape:label="text-03"><tspan
+           sodipodi:role="line"
+           id="tspan38"
+           x="867.93634"
+           y="424.94028">03</tspan></text>
+      <text
+         xml:space="preserve"
+         style="writing-mode:lr-tb;direction:ltr;fill:#000000;fill-opacity:1;stroke:none;stroke-opacity:1"
+         x="637.2005"
+         y="344.31918"
+         id="text44"
+         inkscape:label="text-01"><tspan
+           sodipodi:role="line"
+           id="tspan44"
+           x="637.2005"
+           y="344.31918">01</tspan></text>
+      <text
+         xml:space="preserve"
+         style="writing-mode:lr-tb;direction:ltr;fill:#000000;fill-opacity:1;stroke:none;stroke-opacity:1"
+         x="720.76086"
+         y="283.33401"
+         id="text45"
+         inkscape:label="text-02"><tspan
+           sodipodi:role="line"
+           id="tspan45"
+           x="720.76086"
+           y="283.33401">02</tspan></text>
+      <text
+         xml:space="preserve"
+         style="writing-mode:lr-tb;direction:ltr;fill:#000000;fill-opacity:1;stroke:none;stroke-opacity:1"
+         x="923.5733"
+         y="560.35852"
+         id="text37"
+         inkscape:label="text-05"><tspan
+           sodipodi:role="line"
+           id="tspan37"
+           x="923.5733"
+           y="560.35852">05</tspan></text>
+      <text
+         xml:space="preserve"
+         style="writing-mode:lr-tb;direction:ltr;fill:#000000;fill-opacity:1;stroke:none;stroke-opacity:1"
+         x="867.30652"
+         y="375.8118"
+         id="text39"
+         inkscape:label="text-04"><tspan
+           sodipodi:role="line"
+           id="tspan39"
+           x="867.30652"
+           y="375.8118">04</tspan></text>
+    </g>
+    <g
+       id="g3"
+       inkscape:label="abluft"
+       transform="translate(-82.300689,5.0388177)">
+      <path
+         id="path62"
+         style="fill:none;fill-opacity:1;fill-rule:nonzero;stroke:#000000;stroke-width:1;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1"
+         d="m 727.44798,198.58319 -0.0737,-72.08787 m -8.53642,-2.65746 8.60798,-8.60798 8.81793,8.81793"
+         inkscape:label="abluft-01"
+         sodipodi:nodetypes="ccccc" />
+    </g>
+    <g
+       id="B01"
+       inkscape:label="B01"
+       transform="translate(-82.300689,5.0388177)">
+      <path
+         style="fill:none;fill-opacity:1;fill-rule:nonzero;stroke:#000000;stroke-width:1;stroke-dasharray:none;stroke-opacity:1"
+         d="m 597.51977,72.0131 h 44.71951 v 105.81517 h -44.71951 z"
+         id="path25"
+         inkscape:label="B01" />
+    </g>
+    <g
+       id="W01"
+       inkscape:label="W01"
+       transform="translate(-82.300689,5.0388177)">
+      <path
+         style="fill:none;fill-opacity:1;fill-rule:nonzero;stroke:#000000;stroke-width:1;stroke-dasharray:none;stroke-opacity:1"
+         d="m 689.68814,226.53684 h -93.63802 v 5.66867 h 94.26787 -4.40896 v 23.72443 h -85.44995 v -23.72443"
+         id="path28"
+         inkscape:label="W01" />
+    </g>
+    <g
+       id="H01"
+       inkscape:label="H01"
+       transform="translate(-82.300689,5.0388177)">
+      <path
+         style="fill:none;fill-opacity:1;fill-rule:nonzero;stroke:#000000;stroke-width:1;stroke-dasharray:none;stroke-opacity:1"
+         d="m 594.37051,178.45812 v 40.52049 H 719.2912 v -40.52049 z"
+         id="path26"
+         inkscape:label="H01-outline" />
+      <path
+         style="fill:none;fill-opacity:1;fill-rule:nonzero;stroke:#000000;stroke-width:1;stroke-dasharray:none;stroke-opacity:1"
+         d="m 615.99544,198.82334 11.23236,11.23236 22.1498,-22.1498 19.84035,19.84035 20.15527,-20.15527 12.59704,12.59704"
+         id="path27"
+         inkscape:label="H01-inside" />
+    </g>
+    <g
+       id="S01"
+       inkscape:label="S01"
+       transform="translate(-82.300689,5.0388177)">
+      <path
+         style="fill:none;fill-opacity:1;fill-rule:nonzero;stroke:#000000;stroke-width:1;stroke-dasharray:none;stroke-opacity:1"
+         d="m 907.40705,406.88451 v 49.96827 l 22.88463,68.02404 21.83487,-68.86384 v -49.33842 z"
+         id="path29" />
+      <path
+         id="path31"
+         style="fill:none;fill-opacity:1;fill-rule:nonzero;stroke:#000000;stroke-width:1;stroke-dasharray:none;stroke-opacity:1"
+         d="m 934.07079,455.17318 v -48.49862 m -9.23783,48.28867 v -47.44887" />
+      <path
+         id="path15306"
+         d="m 926.48307,419.85495 c 7.87188,1.88709 17.36105,7.87695 17.36109,13.86685 0,10.23537 -27.70733,20.47076 -27.70726,10.23532 4e-5,-10.23527 27.70722,5e-5 27.70726,10.23544 0,7.92695 -10.3203,14.17429 -17.81645,14.6916"
+         style="fill:none;fill-opacity:1;stroke:#000000;stroke-width:1.14065;stroke-linecap:round;stroke-linejoin:round;stroke-miterlimit:4;stroke-dasharray:none;stroke-dashoffset:18.8976;stroke-opacity:1;marker-end:url(#marker2430-7);paint-order:normal"
+         sodipodi:nodetypes="csssc" />
+      <foreignObject 
+       id="cyclone-animation-foreign"
+       x="920"
+       y="450"
+       width="1"
+       height="1"
+       style="overflow: visible;">
+      <div id="cyclone-animation-container" xmlns="http://www.w3.org/1999/xhtml">
+        <img src="" alt="Cyclone Airflow Animation" id="cyclone-frame" />
+      </div>
+    </foreignObject>
+    </g>
+    <g
+       id="B03"
+       inkscape:label="B03"
+       transform="translate(-82.300689,5.0388177)">
+      <path
+         style="fill:none;fill-opacity:1;fill-rule:nonzero;stroke:#000000;stroke-width:1;stroke-dasharray:none;stroke-opacity:1"
+         d="m 908.28506,585.34263 v 71.1733 h 43.8797 v -70.7534 c -2.06085,-0.0839 -22.75439,-0.14524 -43.8797,-0.4199 z"
+         id="path32"
+         inkscape:label="B03"
+         sodipodi:nodetypes="ccccc" />
+    </g>
+    <g
+       id="VP01"
+       inkscape:label="VP01"
+       transform="translate(-126.24413,-116.6964)">
+      <ellipse
+         style="fill:none;fill-opacity:1;fill-rule:nonzero;stroke:#000000;stroke-width:1.05894;stroke-dasharray:none;stroke-opacity:1"
+         id="path33"
+         cx="707.95386"
+         cy="622.39893"
+         rx="31.684263"
+         ry="31.369337" />
+      <path
+         id="path35"
+         style="fill:none;fill-opacity:1;fill-rule:nonzero;stroke:#000000;stroke-width:1;stroke-dasharray:none;stroke-opacity:1"
+         d="m 678.3508,634.26115 40.31054,18.05576 m 0.26244,-59.31107 -40.36303,17.53088"
+         sodipodi:nodetypes="cccc" />
+    </g>
+    <g
+       id="F01"
+       inkscape:label="F01"
+       transform="translate(-82.300689,5.0388177)">
+      <path
+         style="fill:none;fill-opacity:1;fill-rule:nonzero;stroke:#000000;stroke-width:1;stroke-dasharray:none;stroke-opacity:1"
+         d="m 717.91388,533.26811 v 71.1733 h 43.8797 v -70.7534 c -2.06085,-0.0839 -22.75439,-0.14524 -43.8797,-0.4199 z"
+         id="path32-8"
+         inkscape:label="B03"
+         sodipodi:nodetypes="ccccc" />
+      <path
+         style="fill:none;stroke:#000000;stroke-opacity:1"
+         d="m 717.94091,584.18062 21.97172,20.33869 21.82327,-20.33869"
+         id="path6" />
+      <path
+         style="fill:none;stroke:#000000;stroke-dasharray:8, 2;stroke-dashoffset:0;stroke-opacity:1"
+         d="m 717.85395,547.55507 11.40267,0.10498 m 0,0 v 34.14525 c 7.14059,0.007 14.28118,0.0108 21.42177,0.0152 v -34.14525 m 0,0 h 11.18089"
+         id="path9"
+         sodipodi:nodetypes="cccccccc" />
+      <path
+         style="fill:none;stroke:#000000;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1"
+         d="m 717.9038,547.58583 h 11.39412"
+         id="path10" />
+      <path
+         style="fill:none;stroke:#000000;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1"
+         d="m 750.71292,547.66005 h 11.17144"
+         id="path11" />
+    </g>
+    <g
+       id="pipe-red"
+       class="pipe-red"
+       transform="translate(-82.300689,5.0388177)">
+      <path
+         style="fill:none;fill-opacity:1;fill-rule:nonzero;stroke:#000000;stroke-width:1;stroke-dasharray:none;stroke-opacity:1"
+         d="m 277.76481,41.150342 342.21969,0.209951 -0.20995,29.183152"
+         id="path23"
+         sodipodi:nodetypes="ccc"
+         inkscape:label="pipe-red-01" />
+      <path
+         id="path50"
+         style="fill:none;fill-opacity:1;fill-rule:nonzero;stroke:#000000;stroke-width:1;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1"
+         d="m 728.03599,300.55237 v 39.86087 m -8.46208,-141.48008 h 7.86825 v 58.7892"
+         inkscape:label="pipe-red-02"
+         sodipodi:nodetypes="ccccc" />
+      <path
+         id="path53"
+         style="fill:none;fill-opacity:1;fill-rule:nonzero;stroke:#000000;stroke-width:1;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1"
+         d="m 930.53213,576.90618 0.14846,8.75899 m -0.29691,-60.86761 -0.14846,9.50128"
+         inkscape:label="pipe-red-03"
+         sodipodi:nodetypes="cccc" />
+    </g>
+    <g id="pipe-blue-red" 
+       class="pipe-blue-red" 
+       inkscape:label="pipe-blue-red"
+       transform="translate(-82.300689,5.0388177)">
+      <!-- Red layer -->
+      <path
+         class="red-layer"
+         style="fill:none;fill-opacity:1;fill-rule:nonzero;stroke:#000000;stroke-width:1;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1"
+         d="m 896.69956,419.90146 h 10.49754 m -65.08473,-42.62 v 42.62 h 13.01695 M 727.2937,340.41324 h 114.90617 v 21.97172"
+         inkscape:label="pipe-blue-red-01" />
+      <!-- Blue layer: same path, dashoffset shifted by 5 to fill red gaps -->
+      <path
+         class="blue-layer"
+         style="fill:none;fill-opacity:1;fill-rule:nonzero;stroke:#000000;stroke-width:1;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1"
+         d="m 896.69956,419.90146 h 10.49754 m -65.08473,-42.62 v 42.62 h 13.01695 M 727.2937,340.41324 h 114.90617 v 21.97172"
+         inkscape:label="pipe-blue-red-01-blue" />
+    </g>
+    <g
+       id="pipe-blue-blue-red"
+       class="pipe-blue-blue-red"
+       transform="translate(-82.300689,5.0388177)">
+      <path
+         class = "blue-layer"
+         style="fill:none;fill-opacity:1;fill-rule:nonzero;stroke:#000000;stroke-width:1;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1"
+         d="m 930.08173,406.46461 v -35.27172 h -33.80207 m -41.57025,0 H 791.7242 v 250.47122 h -52.06778 v -17.29326"
+         inkscape:label="pipe-blue-blue-red-01"
+         sodipodi:nodetypes="ccccccc" />
+      <path
+         class = "red-layer"
+         style="fill:none;fill-opacity:1;fill-rule:nonzero;stroke:#000000;stroke-width:1;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1"
+         d="m 930.08173,406.46461 v -35.27172 h -33.80207 m -41.57025,0 H 791.7242 v 250.47122 h -52.06778 v -17.29326"
+         inkscape:label="pipe-blue-blue-red-01"
+         sodipodi:nodetypes="ccccccc" />
+    </g>
+    <g
+       id="pipe"
+       class="pipe"
+       transform="translate(-82.300689,5.0388177)">
+      <path
+         id="path60"
+         style="fill:none;fill-opacity:1;fill-rule:nonzero;stroke:#000000;stroke-width:1;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1"
+         d="m 665.96371,340.33013 h 61.72551 m -450.13436,-0.4199 c 115.05297,0.11806 230.10599,0.15529 345.159,0.20995"
+         inkscape:label="pipe-blue-01"
+         sodipodi:nodetypes="cccc" />
+      <path
+         id="path12"
+         style="fill:none;stroke:#000000;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1"
+         d="m 739.76143,533.48483 v -34.01202 h -43.98468 m -63.64433,0.82927 H 280.88176" />
+    </g>
+    <path
+       style="fill:none;fill-opacity:1;stroke:#000000;stroke-width:0.6;stroke-dasharray:7.2, 7.2;stroke-dashoffset:0;stroke-opacity:1"
+       d="M 699.97576,641.60946 V 396.387 H 496.74344 l 0.41991,245.64236 z"
+       id="path22"
+       sodipodi:nodetypes="ccccc" />
+  </g>
+  <g
+
+
+    </div>
+    
+    <div id="info-panel">
+        <span class="close-btn" onclick="closeInfo()">×</span>
+        <h3 id="panel-title"></h3>
+         <iframe id="panel-frame" src="https://de.wikipedia.org/wiki/Fliehkraftabscheider" style="width: 100%; height: 600px; border: none;"></iframe>
+    </div>
+    
+    <!-- Cyclone PNG Frame Animation Container -->
+    <div id="cyclone-animation-container">
+        <img src="" alt="Cyclone Airflow Animation" id="cyclone-frame">
+    </div>
+
+    <script>
+        
+        async function loadEquipmentFile(equipmentId) {
+            const folderUrl = './contentinfo/'; 
+            const fileUrl = `${folderUrl}${equipmentId}.html`;
+
+            async function fetchFile(url) {
+                const response = await fetch(url);
+
+                if (!response.ok) {
+                throw new Error(`File not found: "${url}" (status ${response.status})`);
+                }
+
+                return await response.text();
+            }
+
+            function displayFile(htmlContent) {
+                const frame = document.getElementById('panel-frame');
+                const title = document.getElementById('panel-title'); 
+                const panel = document.getElementById('info-panel');
+
+                title.textContent = `${equipmentId}`;
+                frame.srcdoc = htmlContent;
+                panel.style.display = 'block';
+            }
+
+            try {
+                const htmlContent = await fetchFile(fileUrl);
+                displayFile(htmlContent);
+            } catch (error) {
+                console.error('Failed to load equipment file:', error);
+            }
+        }
+
+        function openInfo() {
+            const panel = document.getElementById('info-panel');
+            const frame = document.getElementById('panel-frame');
+
+            panel.style.display = 'display_inside';
+        }
+
+        function closeInfo() {
+            const panel = document.getElementById('info-panel');
+            const frame = document.getElementById('panel-frame');
+
+            panel.style.display = 'none';
+            frame.srcdoc = '';
+        } 
+    
+
+        function setupInteractivity() {
+            // Get marker path once for S01
+            const markerPath = document.querySelector('#marker2430-7 path');
+            
+            // Find all elements with IDs that match your equipment database
+            Object.keys(equipmentData).forEach(equipmentId => {
+                const element = document.getElementById(equipmentId);
+                
+                if (element) {
+                    element.classList.add('clickable');
+                    
+                    // Click event
+                    element.addEventListener('click', function(e) {
+                        e.stopPropagation();
+                        loadEquipmentFile(equipmentId);
+                        console.log("Click detected")
+                        
+                    });
+                    
+                    // Add hover listeners for all elements
+                    element.addEventListener('mouseenter', function() {
+                        // Clear any previous fill markers
+                        element.querySelectorAll('.fill-target').forEach(el => el.classList.remove('fill-target'));
+                        
+                        // Find the right shape to fill based on element type
+                        let mainShape = null;
+                        
+                        if (equipmentId === 'VP01') {
+                            // VP01: fill the circle
+                            mainShape = element.querySelector('ellipse[id="path33"]');
+                        } else if (equipmentId === 'B03') {
+                            // B03: fill the outer rectangle path (id="path32")
+                            mainShape = element.querySelector('path[id="path32"]');
+                        } else if (equipmentId === 'S01') {
+                            // S01: fill the outer cyclone path (id="path29")
+                            mainShape = element.querySelector('path[id="path29"]');
+                        } else if (equipmentId === 'H01') {
+                            // H01: fill the rectangle path (id="path26")
+                            mainShape = element.querySelector('path[id="path26"]');
+                        } else if (equipmentId === 'F01') {
+                            // F01: fill the outer rectangle (id="path32-8")
+                            mainShape = element.querySelector('path[id="path32-8"]');
+                        } else if (equipmentId === 'B01') {
+                            // B01: fill the outer rectangle (id="path25")
+                            mainShape = element.querySelector('path[id="path25"]');
+                        } else if (equipmentId === 'W01') {
+                            // W01: fill the outer rectangle (id="path28")
+                            mainShape = element.querySelector('path[id="path28"]');
+                        }
+                        
+                        if (mainShape) {
+                            // Mark this element to receive fill
+                            mainShape.classList.add('fill-target');
+                            mainShape.setAttribute('fill', 'rgba(255, 0, 0, 0.15)');
+                            mainShape.style.fill = 'rgba(255, 0, 0, 0.15)';
+                        }
+                        
+                        // Only change marker color if hovering over S01
+                        if (equipmentId === 'S01' && markerPath) {
+                            markerPath.setAttribute('fill', '#ff0000');
+                            markerPath.setAttribute('stroke', '#ff0000');
+                            markerPath.style.fill = '#ff0000';
+                            markerPath.style.stroke = '#ff0000';
+                        }
+                    });
+                    
+                    element.addEventListener('mouseleave', function() {
+                        // Remove fill from target element
+                        const fillTarget = element.querySelector('.fill-target');
+                        if (fillTarget) {
+                            fillTarget.classList.remove('fill-target');
+                            fillTarget.setAttribute('fill', 'none');
+                            fillTarget.style.fill = 'none';
+                        }
+                        
+                        // Special handling for B03 (it's not inside the group)
+                        if (equipmentId === 'B03') {
+                            const b03Element = document.getElementById('B03');
+                            if (b03Element) {
+                                b03Element.classList.remove('fill-target');
+                                b03Element.setAttribute('fill', 'none');
+                                b03Element.style.fill = 'none';
+                            }
+                        }
+                        
+                        // Only restore marker color if leaving S01
+                        if (equipmentId === 'S01' && markerPath) {
+                            markerPath.setAttribute('fill', '#000000');
+                            markerPath.setAttribute('stroke', '#000000');
+                            markerPath.style.fill = '#000000';
+                            markerPath.style.stroke = '#000000';
+                        }
+                    });
+                }
+            });
+        }
+
+        const equipmentData = {
+            'VP01': {},
+            'S01': {},
+            'H01': {},
+            'B03': {},
+            'F01': {},
+            'B01': {},
+            'W01': {}
+        };
+
+
+
+        /* ============================================ */
+        /* PNG FRAME ANIMATION CONFIGURATION           */
+        /* ============================================ */
+        
+        const ANIMATION_CONFIG = {
+            // TOTAL NUMBER OF FRAMES
+            totalFrames: 140,
+            
+            // FRAMES PER SECOND (higher = faster animation)
+            fps: 30,  // Try: 15 (slow), 24 (normal), 30 (smooth), 60 (very fast)
+            
+            // DIRECTORY PATH where your PNG frames are located
+            // Examples:
+            // - Same folder: ""
+            // - Subfolder: "frames/"
+            // - Multiple levels: "animations/cyclone/"
+            framesPath: "./Animation/png-2160x3672/",
+            
+            // FILENAME PATTERN
+            // Your frames should be named like: frame_001.png, frame_002.png, ..., frame_140.png
+            // Or: cyclone_001.png, cyclone_002.png, etc.
+            framePrefix: "0",
+            frameSuffix: ".png",    // The file extension
+            
+            // NUMBER PADDING (how many digits)
+            // 3 = 001, 002, ..., 140
+            // 4 = 0001, 0002, ..., 0140
+            numberPadding: 3,
+            
+            // PRELOAD FRAMES (recommended for smooth playback)
+            preloadFrames: true
+        };
+        
+        /* ============================================ */
+        /* END OF CONFIGURATION                         */
+        /* ============================================ */
+        
+        // Animation state
+        let animationInterval = null;
+        let currentFrame = 0;
+        let framesLoaded = [];
+        let frameImages = [];
+        
+        // Preload all frames
+        function preloadFrames() {
+            if (!ANIMATION_CONFIG.preloadFrames) return;
+            
+            console.log('Preloading frames...');
+            let loadedCount = 0;
+            
+            for (let i = 1; i <= ANIMATION_CONFIG.totalFrames; i++) {
+                const img = new Image();
+                const framePath = getFramePath(i);
+                
+                img.onload = function() {
+                    loadedCount++;
+                    framesLoaded[i] = true;
+                    if (loadedCount === ANIMATION_CONFIG.totalFrames) {
+                        console.log('All frames preloaded successfully!');
+                    }
+                };
+                
+                img.onerror = function() {
+                    console.warn(`Failed to load frame: ${framePath}`);
+                    framesLoaded[i] = false;
+                };
+                
+                img.src = framePath;
+                frameImages[i] = img;
+            }
+        }
+        
+        // Get the path for a specific frame number
+        function getFramePath(frameNumber) {
+            // Pad the frame number with zeros
+            const paddedNumber = String(frameNumber).padStart(ANIMATION_CONFIG.numberPadding, '0');
+            
+            // Construct the full path
+            return ANIMATION_CONFIG.framesPath + 
+                   ANIMATION_CONFIG.framePrefix + 
+                   paddedNumber + 
+                   ANIMATION_CONFIG.frameSuffix;
+        }
+        
+        // Update the displayed frame
+        function updateFrame() {
+            const frameImg = document.getElementById('cyclone-frame');
+            
+            if (ANIMATION_CONFIG.preloadFrames && frameImages[currentFrame + 1]) {
+                // Use preloaded image
+                frameImg.src = frameImages[currentFrame + 1].src;
+            } else {
+                // Load directly
+                frameImg.src = getFramePath(currentFrame + 1);
+            }
+            
+            // Move to next frame
+            currentFrame++;
+            if (currentFrame >= ANIMATION_CONFIG.totalFrames) {
+                currentFrame = 0;  // Loop back to start
+            }
+        }
+        
+        // Start the frame animation
+        function startFrameAnimation() {
+            if (animationInterval) return;  // Already running
+            
+            const container = document.getElementById('cyclone-animation-container');
+            container.classList.add('active');
+            
+            // Calculate interval in milliseconds
+            const intervalMs = 1000 / ANIMATION_CONFIG.fps;
+            
+            // Set first frame immediately
+            currentFrame = 0;
+            updateFrame();
+            
+            // Start animation loop
+            animationInterval = setInterval(updateFrame, intervalMs);
+            
+            console.log(`Frame animation started: ${ANIMATION_CONFIG.fps} fps, ${intervalMs.toFixed(2)} ms per frame`);
+        }
+        
+        // Stop the frame animation
+        function stopFrameAnimation() {
+            if (animationInterval) {
+                clearInterval(animationInterval);
+                animationInterval = null;
+            }
+            
+            const container = document.getElementById('cyclone-animation-container');
+            container.classList.remove('active');
+            
+            currentFrame = 0;
+            console.log('Frame animation stopped');
+        }
+        
+        // Simulation state
+        let simulationActive = false;
+
+        // Wait for page to load
+        window.addEventListener('DOMContentLoaded', function() {
+            setupInteractivity();
+            setupPanZoom();
+            
+            // Preload frames if enabled
+            if (ANIMATION_CONFIG.preloadFrames) {
+                preloadFrames();
+            }
+        });
+
+        
+
+        function setupPanZoom() {
+            // Enable pan and zoom functionality
+            const svgElement = document.querySelector('#pid-container svg');
+            if (svgElement) {
+                svgPanZoom(svgElement, {
+                    zoomEnabled: true,
+                    controlIconsEnabled: true,
+                    fit: true,
+                    center: true,
+                    minZoom: 0.8,
+                    maxZoom: 3
+                });
+            }
+        }
+
+        // SIMULATION MODE TOGGLE
+        function toggleSimulation() {
+            simulationActive = !simulationActive;
+            const button = document.getElementById('simulation-toggle');
+            
+            if (simulationActive) {
+                button.textContent = 'Stop Simulation';
+                button.classList.add('active');
+                document.body.classList.add('simulation-active');
+                
+                // Start PNG frame animation
+                startFrameAnimation();
+                
+                startSimulation();
+            } else {
+                button.textContent = 'Start Simulation';
+                button.classList.remove('active');
+                document.body.classList.remove('simulation-active');
+                
+                // Stop PNG frame animation
+                stopFrameAnimation();
+                
+                stopSimulation();
+            }
+        }
+
+        function startSimulation() {
+            // Animate all pipe groups (standard, blue-red, and red)
+            const pipeGroups = [
+                document.getElementById('pipe'),
+                document.getElementById('pipe-blue-red'),
+                document.getElementById('pipe-blue-blue-red'),
+                document.getElementById('pipe-red')
+            ];
+            
+            // Also find any elements with the class names
+            const pipeClassGroups = [
+                ...document.querySelectorAll('.pipe'),
+                ...document.querySelectorAll('.pipe-blue-red'),
+                ...document.querySelectorAll('.pipe-blue-blue-red'),
+                ...document.querySelectorAll('.pipe-red')
+            ];
+            
+            // Combine both approaches
+            const allPipes = [...pipeGroups.filter(p => p), ...pipeClassGroups];
+            
+            allPipes.forEach(pipeGroup => {
+                if (pipeGroup) {
+                    pipeGroup.classList.add('flowing');
+                    
+                    // Set fixed animation speed (2 seconds)
+                    const paths = pipeGroup.querySelectorAll('path');
+                    paths.forEach(path => {
+                        path.style.animationDuration = '2s';
+                    });
+                }
+            });
+
+            console.log('Simulation started - flow animation active');
+        }
+
+        function stopSimulation() {
+            // Stop all pipe animations (standard, blue-red, and red)
+            const pipeGroups = [
+                document.getElementById('pipe'),
+                document.getElementById('pipe-blue-red'),
+                document.getElementById('pipe-blue-blue-red'),
+                document.getElementById('pipe-red')
+            ];
+            
+            // Also find any elements with the class names
+            const pipeClassGroups = [
+                ...document.querySelectorAll('.pipe'),
+                ...document.querySelectorAll('.pipe-blue-red'),
+                ...document.querySelectorAll('.pipe-blue-blue-red'),
+                ...document.querySelectorAll('.pipe-red')
+            ];
+            
+            // Combine both approaches
+            const allPipes = [...pipeGroups.filter(p => p), ...pipeClassGroups];
+            
+            allPipes.forEach(pipeGroup => {
+                if (pipeGroup) {
+                    pipeGroup.classList.remove('flowing');
+                }
+            });
+
+            console.log('Simulation stopped');
+        }
+    </script>
+</body>
+</html>
